@@ -119,12 +119,15 @@ def run_response_node(state: dict) -> dict:
 
         # Cost breakdown (shown after hospital selected)
         "cost_result":     cost_result,
+        "cost_results_by_hospital": state.get("cost_results_by_hospital", {}),
 
         # PFL financing
         "pfl_options":     pfl_options,
+        "pfl_options_by_hospital": state.get("pfl_options_by_hospital", {}),
 
         # Loan eligibility
         "loan_eligibility": loan_elig,
+        "loan_eligibility_by_hospital": state.get("loan_eligibility_by_hospital", {}),
 
         # Responsible AI
         "disclaimer":      "⚠️ This is decision support only — not a medical diagnosis. Costs are estimates and may vary. Please consult a qualified doctor before making medical decisions.",
