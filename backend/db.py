@@ -11,16 +11,14 @@ from datetime import datetime
 
 load_dotenv()
 
-# ── Supabase client ────────────────────────────────────────────────────────────
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 DOCUMENT_BUCKET = os.getenv("DOCUMENT_BUCKET", "medical-documents")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-print("✅ Supabase connected")
+print(" Supabase connected")
 
 
-# ── UUID helper ───────────────────────────────────────────────────────────────
 
 DOC_TYPE_ALIASES = {
     "cibil": "cibil_report",
@@ -96,9 +94,7 @@ def _normalize_profile(data: dict, include_sensitive: bool = False) -> dict:
     return data
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# USER PROFILES
-# ══════════════════════════════════════════════════════════════════════════════
+
 
 def save_user_profile(user_id: str, profile: dict) -> bool:
     """Save or update user health profile."""
@@ -126,7 +122,7 @@ def save_user_profile(user_id: str, profile: dict) -> bool:
         supabase.table("user_profiles").upsert(data, on_conflict="user_id").execute()
         return True
     except Exception as e:
-        print(f"❌ save_user_profile error: {e}")
+        print(f" save_user_profile error: {e}")
         return False
 
 
@@ -144,7 +140,7 @@ def get_user_profile(user_id: str) -> dict | None:
             return _normalize_profile(res.data)
         return None
     except Exception as e:
-        print(f"❌ get_user_profile error: {e}")
+        print(f" get_user_profile error: {e}")
         return None
 
 
@@ -166,9 +162,6 @@ def get_user_profile_by_email(email: str, include_sensitive: bool = False) -> di
         return None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# USER FINANCIALS
-# ══════════════════════════════════════════════════════════════════════════════
 
 def _normalize_cibil_score(value) -> int | None:
     if value in (None, ""):
@@ -202,7 +195,7 @@ def save_user_financials(user_id: str, financials: dict) -> bool:
         supabase.table("user_financials").upsert(data, on_conflict="user_id").execute()
         return True
     except Exception as e:
-        print(f"❌ save_user_financials error: {e}")
+        print(f" save_user_financials error: {e}")
         return False
 
 
@@ -229,13 +222,11 @@ def get_user_financials(user_id: str) -> dict | None:
             return data
         return None
     except Exception as e:
-        print(f"❌ get_user_financials error: {e}")
+        print(f" get_user_financials error: {e}")
         return None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# USER DOCUMENTS
-# ══════════════════════════════════════════════════════════════════════════════
+
 
 def save_document_metadata(user_id: str, doc_type: str,
                             filename: str, extracted: bool = False,
@@ -259,7 +250,7 @@ def save_document_metadata(user_id: str, doc_type: str,
         supabase.table("user_documents").insert(data).execute()
         return True
     except Exception as e:
-        print(f"❌ save_document_metadata error: {e}")
+        print(f" save_document_metadata error: {e}")
         return False
 
 
@@ -274,7 +265,7 @@ def get_user_documents(user_id: str) -> list[dict]:
         )
         return res.data or []
     except Exception as e:
-        print(f"❌ get_user_documents error: {e}")
+        print(f" get_user_documents error: {e}")
         return []
 
 
@@ -291,7 +282,7 @@ def mark_document_extracted(user_id: str, doc_type: str) -> bool:
         )
         return True
     except Exception as e:
-        print(f"❌ mark_document_extracted error: {e}")
+        print(f" mark_document_extracted error: {e}")
         return False
 
 
@@ -322,7 +313,7 @@ def update_document_extraction(
         )
         return True
     except Exception as e:
-        print(f"❌ update_document_extraction error: {e}")
+        print(f" update_document_extraction error: {e}")
         return False
 
 
@@ -356,13 +347,11 @@ def delete_user_document(user_id: str, document_id: str) -> bool:
         )
         return True
     except Exception as e:
-        print(f"❌ delete_user_document error: {e}")
+        print(f" delete_user_document error: {e}")
         return False
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SESSIONS (conversation state)
-# ══════════════════════════════════════════════════════════════════════════════
+
 
 def get_user_document(user_id: str, document_id: str) -> dict | None:
     """Get one document belonging to a user."""
@@ -439,7 +428,7 @@ def save_session(session_id: str, state: dict, user_id: str = None) -> bool:
         supabase.table("sessions").upsert(data, on_conflict="id").execute()
         return True
     except Exception as e:
-        print(f"❌ save_session error: {e}")
+        print(f" save_session error: {e}")
         return False
 
 
@@ -458,7 +447,7 @@ def get_session(session_id: str, user_id: str | None = None) -> dict | None:
             return res.data[0].get("langgraph_state")
         return None
     except Exception as e:
-        print(f"❌ get_session error: {e}")
+        print(f" get_session error: {e}")
         return None
 
 
@@ -495,7 +484,7 @@ def get_user_sessions(user_id: str, limit: int = 10) -> list[dict]:
             })
         return sessions
     except Exception as e:
-        print(f"❌ get_user_sessions error: {e}")
+        print(f" get_user_sessions error: {e}")
         return []
 
 
@@ -505,13 +494,10 @@ def delete_session(session_id: str) -> bool:
         supabase.table("sessions").delete().eq("id", session_id).execute()
         return True
     except Exception as e:
-        print(f"❌ delete_session error: {e}")
+        print(f" delete_session error: {e}")
         return False
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# QUERY LOGS
-# ══════════════════════════════════════════════════════════════════════════════
 
 def log_query(session_id: str, user_id: str, state: dict) -> bool:
     """Log every query for demo + debugging."""
@@ -529,7 +515,7 @@ def log_query(session_id: str, user_id: str, state: dict) -> bool:
         supabase.table("query_logs").insert(data).execute()
         return True
     except Exception as e:
-        print(f"❌ log_query error: {e}")
+        print(f" log_query error: {e}")
         return False
 
 
@@ -546,11 +532,10 @@ def get_recent_queries(user_id: str, limit: int = 10) -> list[dict]:
         )
         return res.data or []
     except Exception as e:
-        print(f"❌ get_recent_queries error: {e}")
+        print(f" get_recent_queries error: {e}")
         return []
 
-# LOAN APPLICATIONS
-# ══════════════════════════════════════════════════════════════════════════════
+
 
 def _as_int(value, default: int | None = None) -> int | None:
     if value in (None, ""):
@@ -603,7 +588,7 @@ def save_loan_application(reference_id: str, user_id: str, application: dict) ->
         supabase.table("loan_applications").insert(data).execute()
         return True
     except Exception as e:
-        print(f"❌ save_loan_application error: {e}")
+        print(f" save_loan_application error: {e}")
         return False
 
 
@@ -619,7 +604,7 @@ def get_loan_application(reference_id: str) -> dict | None:
         )
         return res.data or None
     except Exception as e:
-        print(f"❌ get_loan_application error: {e}")
+        print(f" get_loan_application error: {e}")
         return None
 
 
@@ -634,7 +619,7 @@ def update_loan_status(reference_id: str, status: str, officer_note: str = "") -
         }).eq("reference_id", reference_id).execute()
         return True
     except Exception as e:
-        print(f"❌ update_loan_status error: {e}")
+        print(f" update_loan_status error: {e}")
         return False
 
 
@@ -681,7 +666,7 @@ def get_all_loan_applications() -> list[dict]:
         )
         return res.data or []
     except Exception as e:
-        print(f"❌ get_all_loan_applications error: {e}")
+        print(f" get_all_loan_applications error: {e}")
         return []
 
 
@@ -726,5 +711,5 @@ def save_document_with_url(user_id: str, doc_type: str,
         supabase.table("user_documents").insert(data).execute()
         return True
     except Exception as e:
-        print(f"❌ save_document_with_url error: {e}")
+        print(f" save_document_with_url error: {e}")
         return False

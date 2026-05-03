@@ -1,7 +1,6 @@
 import { Check } from 'lucide-react'
 
-// steps: [{ label }]
-// current: 0-based index
+
 export default function StepIndicator({ steps, current }) {
   return (
     <div style={{
@@ -56,7 +55,7 @@ export default function StepIndicator({ steps, current }) {
               <div style={{
                 flex: 1,
                 height: 2,
-                marginBottom: 22, // align with circles not labels
+                marginBottom: 22, 
                 background: done ? 'var(--teal-300)' : 'var(--gray-200)',
                 transition: 'background var(--transition-base)',
               }} />

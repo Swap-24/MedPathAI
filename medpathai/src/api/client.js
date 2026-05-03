@@ -6,7 +6,7 @@ const PFL_API_KEY = import.meta.env.VITE_PFL_OFFICER_API_KEY
 
 const client = axios.create({
   baseURL: BASE_URL,
-  timeout: 60000, // 60s — LangGraph pipeline can be slow
+  timeout: 60000, 
   headers: {
     'Content-Type': 'application/json',
   },
@@ -32,7 +32,6 @@ client.interceptors.request.use((config) => {
   return config
 })
 
-// ── Response interceptor — normalise errors ──────────────────
 client.interceptors.response.use(
   (response) => response.data,
   (error) => {

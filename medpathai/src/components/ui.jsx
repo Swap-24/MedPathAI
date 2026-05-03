@@ -1,4 +1,3 @@
-// ── Spinner ──────────────────────────────────────────────────
 export function Spinner({ size = 20, color = 'var(--color-accent)' }) {
   return (
     <svg
@@ -19,7 +18,6 @@ export function Spinner({ size = 20, color = 'var(--color-accent)' }) {
   )
 }
 
-// ── Badge ────────────────────────────────────────────────────
 export function Badge({ children, variant = 'default', className = '' }) {
   const variantMap = {
     nabh:      'badge-nabh',
@@ -39,7 +37,6 @@ export function Badge({ children, variant = 'default', className = '' }) {
   )
 }
 
-// ── Rating Stars ─────────────────────────────────────────────
 export function RatingStars({ rating }) {
   const full  = Math.floor(rating)
   const half  = rating % 1 >= 0.5 ? 1 : 0
@@ -72,7 +69,6 @@ export function RatingStars({ rating }) {
   )
 }
 
-// ── Toast container ──────────────────────────────────────────
 import { useUIStore } from '../store/uiStore'
 
 export function ToastContainer() {
@@ -115,7 +111,6 @@ export function ToastContainer() {
   )
 }
 
-// ── Eligibility pill ─────────────────────────────────────────
 export function EligibilityPill({ decision }) {
   const map = {
     GREEN:  { label: 'Pre-Approved',       variant: 'green' },

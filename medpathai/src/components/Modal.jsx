@@ -6,7 +6,6 @@ export default function Modal({ title, children, onClose, width = 480 }) {
   const closeModal = useUIStore((s) => s.closeModal)
   const close = onClose || closeModal
 
-  // Close on Escape
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') close() }
     document.addEventListener('keydown', handler)

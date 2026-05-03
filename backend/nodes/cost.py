@@ -13,7 +13,6 @@ load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 _gemini = genai.GenerativeModel("gemini-2.5-flash")
 
-# ── Gemini cost estimator for unmapped procedures ─────────────────────────────
 
 _ESTIMATE_PROMPT = """
 You are a medical cost estimation expert for Indian hospitals.
@@ -128,7 +127,6 @@ Rules:
         print(f"❌ _gemini_estimate_costs_batch error: {e}")
         return [None] * len(hospitals)
 
-# ── Per-hospital cost estimator ───────────────────────────────────────────────
 
 def _estimate_for_hospital(
     hospital: dict,
@@ -174,7 +172,6 @@ def _estimate_for_hospital(
         insurance_coverage=profile.get("insurance_coverage", 0),
     )
 
-    # Tag AI-estimated results so the frontend can show a disclaimer
     cost_result["is_estimated"] = is_estimated
     if is_estimated:
         cost_result["estimated_disclaimer"] = (
@@ -230,7 +227,6 @@ def _estimate_for_hospital(
     }
 
 
-# ── Graph node ────────────────────────────────────────────────────────────────
 
 def run_cost_node(state: dict) -> dict:
     """
@@ -246,7 +242,6 @@ def run_cost_node(state: dict) -> dict:
     selected   = state.get("selected_hospital")
     hospitals  = state.get("hospitals", [])
 
-    # Symptom context for Gemini estimator
     symptom_ctx = {
         "symptom_summary": state.get("symptom_summary"),
         "possible_causes": state.get("possible_causes", []),

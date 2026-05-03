@@ -8,8 +8,7 @@ import {
   setAccessToken,
 } from './session'
 
-// Generate a stable userId for this browser.
-// In a real auth system this would come from a login token.
+
 export function getUserId() {
   let userId = localStorage.getItem(USER_ID_KEY)
   if (!userId) {

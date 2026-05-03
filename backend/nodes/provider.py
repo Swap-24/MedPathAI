@@ -38,8 +38,6 @@ def run_provider_node(state: dict) -> dict:
     city_info = get_city_info(city)
 
     # Distance origin:
-    # 1. GPS coordinates when the user has granted location access.
-    # 2. Otherwise, the current city saved in the user's profile.
     gps_lat = state.get("user_lat")
     gps_lon = state.get("user_lon")
     if gps_lat is not None and gps_lon is not None:

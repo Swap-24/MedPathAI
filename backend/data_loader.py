@@ -6,35 +6,29 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Supabase client ────────────────────────────────────────────────────────────
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ── Table names — change here if your Supabase table is named differently ─────
-#    Common mistake: CSV is "hospital_rows.csv" but Supabase table might be
-#    "hospitals" (plural). Check your Supabase dashboard and update this:
-HOSPITALS_TABLE  = "hospital"    # ← change to "hospital" if that's your table name
+
+HOSPITALS_TABLE  = "hospital"    
 PROCEDURES_TABLE = "procedures"
 CITIES_TABLE     = "cities"
 
-# ── Load data from Supabase at startup ────────────────────────────────────────
 def _load_table(table_name: str) -> pd.DataFrame:
     """Load entire table from Supabase into pandas DataFrame."""
     res = supabase.table(table_name).select("*").execute()
     return pd.DataFrame(res.data)
 
-print("⏳ Loading data from Supabase...")
+print(" Loading data from Supabase...")
 
 hospitals_df  = _load_table(HOSPITALS_TABLE)
 procedures_df = _load_table(PROCEDURES_TABLE)
 cities_df     = _load_table(CITIES_TABLE)
 
-# Normalize city_tier: tier1 → metro (handles both naming conventions)
 if "city_tier" in hospitals_df.columns:
     hospitals_df["city_tier"] = hospitals_df["city_tier"].replace({"tier1": "metro"})
 
-# Lowercase for matching
 hospitals_df["city_lower"]      = hospitals_df["city"].str.lower().str.strip()
 cities_df["city_lower"]         = cities_df["city"].str.lower().str.strip()
 procedures_df["procedure_name"] = procedures_df["procedure_name"].str.lower().str.strip()
@@ -43,7 +37,6 @@ print(f"✅ Loaded {len(hospitals_df)} hospitals, "
       f"{len(procedures_df)} procedures, "
       f"{len(cities_df)} cities from Supabase")
 
-# ── Supported procedures ───────────────────────────────────────────────────────
 SUPPORTED_PROCEDURES = [
     "angioplasty", "appendectomy", "arthroscopy", "bypass_cabg",
     "c_section", "cataract", "colonoscopy", "ct_scan", "dialysis_single",
@@ -52,7 +45,6 @@ SUPPORTED_PROCEDURES = [
     "knee_replacement", "lasik", "mri_scan", "normal_delivery"
 ]
 
-# ── Comorbidity cost multipliers ───────────────────────────────────────────────
 COMORBIDITY_MULTIPLIERS = {
     "diabetes":        {"cost_add": 0.12, "icu_risk": 0.18, "label": "Diabetes"},
     "hypertension":    {"cost_add": 0.08, "icu_risk": 0.10, "label": "Hypertension"},
@@ -62,7 +54,6 @@ COMORBIDITY_MULTIPLIERS = {
     "obesity":         {"cost_add": 0.10, "icu_risk": 0.12, "label": "Obesity"},
 }
 
-# ── Cost component splits ──────────────────────────────────────────────────────
 COST_COMPONENTS = {
     "procedure":     0.55,
     "doctor_fees":   0.12,
@@ -72,7 +63,6 @@ COST_COMPONENTS = {
     "contingency":   0.02,
 }
 
-# ── Helper: Haversine distance (km) ───────────────────────────────────────────
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371
     lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
@@ -81,7 +71,6 @@ def haversine(lat1, lon1, lat2, lon2):
     a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
     return R * 2 * atan2(sqrt(a), sqrt(1 - a))
 
-# ── Get city info ──────────────────────────────────────────────────────────────
 def get_city_info(city_name: str) -> dict | None:
     match = cities_df[cities_df["city_lower"] == city_name.lower().strip()]
     if match.empty:
@@ -99,13 +88,11 @@ def get_city_info(city_name: str) -> dict | None:
         "longitude": float(row["longitude"]),
     }
 
-# ── Get hospitals by city ──────────────────────────────────────────────────────
 def get_hospitals_by_city(city_name: str) -> pd.DataFrame:
     return hospitals_df[
         hospitals_df["city_lower"] == city_name.lower().strip()
     ].copy()
 
-# ── Get procedures for a hospital ─────────────────────────────────────────────
 def get_procedure_for_hospital(hospital_id: str, procedure_name: str) -> dict | None:
     match = procedures_df[
         (procedures_df["hospital_id"] == hospital_id) &
@@ -140,7 +127,6 @@ def _to_bool(val) -> bool:
         return val.strip().lower() == "true"
     return bool(val)
 
-# ── Score a single hospital ────────────────────────────────────────────────────
 def score_hospital(hospital: dict, procedure: dict, budget: int | None,
                    deadline_days: int | None, is_emergency: bool) -> float:
 
@@ -176,7 +162,6 @@ def score_hospital(hospital: dict, procedure: dict, budget: int | None,
     total = spec + rating + nabh + insur + budget_score + wait_score
     return round(total, 2)
 
-# ── Main search function ───────────────────────────────────────────────────────
 def search_hospitals(
     city: str,
     procedure_name: str,
@@ -241,15 +226,13 @@ def search_hospitals(
         else:
             results.append(entry)
 
-    # Sort within budget by score
     results.sort(key=lambda x: x["score"], reverse=True)
     top = results[:limit]
 
-    # Always add best over-budget hospital
     if over_budget:
         over_budget.sort(key=lambda x: x["score"], reverse=True)
         best_over = over_budget[0]
-        best_over["over_budget_label"] = "⚠️ Over budget — highest rated"
+        best_over["over_budget_label"] = " Over budget — highest rated"
         top.append(best_over)
 
     return top
@@ -326,7 +309,6 @@ def search_best_hospitals_by_city(
     results.sort(key=lambda x: x["score"], reverse=True)
     return results[:limit]
 
-# ── Calculate cost breakdown ───────────────────────────────────────────────────
 def calculate_cost_breakdown(
     procedure: dict,
     comorbidities: list[str],
@@ -338,7 +320,6 @@ def calculate_cost_breakdown(
     base_max = procedure["max_cost_inr"]
     base_avg = procedure["avg_cost_inr"]
 
-    # Comorbidity multiplier
     multiplier = 1.0
     risk_flags = []
     for c in comorbidities:
@@ -347,14 +328,12 @@ def calculate_cost_breakdown(
         if m.get("icu_risk", 0) > 0.2:
             risk_flags.append(f"{m.get('label', c)} may require ICU monitoring")
 
-    # Age adjustment
     if age and age > 65:
         multiplier += 0.10
         risk_flags.append("Age >65 increases recovery complexity")
     elif age and age > 50:
         multiplier += 0.05
 
-    # Confidence — widen range if info is missing
     missing = sum(1 for v in [age] if v is None)
     margin  = 0.15 + missing * 0.05
 
@@ -362,7 +341,6 @@ def calculate_cost_breakdown(
     adj_max = int(base_max * multiplier * (1 + margin))
     adj_avg = int(base_avg * multiplier)
 
-    # Component breakdown
     breakdown = {}
     for component, pct in COST_COMPONENTS.items():
         breakdown[component] = {
@@ -370,7 +348,6 @@ def calculate_cost_breakdown(
             "max": int(adj_max * pct),
         }
 
-    # Insurance gap
     insurance_coverage = insurance_coverage or 0
     you_pay_min = max(0, adj_min - insurance_coverage)
     you_pay_max = max(0, adj_max - insurance_coverage)
@@ -388,7 +365,6 @@ def calculate_cost_breakdown(
         "multiplier_applied": round(multiplier, 2),
     }
 
-# ── PFL EMI Calculator ─────────────────────────────────────────────────────────
 PFL_RATE_ANNUAL = 0.0999
 
 def calculate_pfl_emi(principal: int, months: int) -> int:
@@ -410,7 +386,6 @@ def calculate_pfl_options(loan_amount: int) -> dict:
         "cta":           "Apply at Poonawalla Fincorp",
     }
 
-# ── Loan Eligibility Check ─────────────────────────────────────────────────────
 def check_loan_eligibility(
     loan_amount: int,
     monthly_income: int,
@@ -427,7 +402,6 @@ def check_loan_eligibility(
     score = 0
     flags = []
 
-    # FOIR scoring
     if foir <= 0.30:   score += 40
     elif foir <= 0.40: score += 25
     elif foir <= 0.50: score += 10

@@ -4,7 +4,6 @@ import { getAccessToken } from './session'
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
-// Upload uses multipart/form-data — bypass the JSON client
 export async function uploadDocument(userId, docType, file, onProgress) {
   const token = getAccessToken()
   const formData = new FormData()

@@ -146,7 +146,6 @@ def run_direct_procedure_pipeline(
     state = run_response_node(state)
     return state.get("final_response", {})
 
-# ── CORS — allow React frontend ────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOW_ORIGINS,
@@ -155,9 +154,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-PFL-API-Key"],
 )
 
-# ══════════════════════════════════════════════════════════════════════════════
-# REQUEST MODELS
-# ══════════════════════════════════════════════════════════════════════════════
+
 
 class ChatRequest(BaseModel):
     message:           str
@@ -276,13 +273,11 @@ def validate_document_extraction(doc_type: str, extracted: dict) -> tuple[bool, 
 
     return True, "Document verified and extracted"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# HEALTH CHECK
-# ══════════════════════════════════════════════════════════════════════════════
+
 
 @app.get("/")
 def root():
-    return {"status": "MedPath AI is running 🚀"}
+    return {"status": "MedPath AI is running "}
 
 @app.get("/health")
 def health():
@@ -312,9 +307,7 @@ def get_cities():
         print(f"Could not load cities from data source: {e}")
         return {"cities": fallback_cities}
 
-# ══════════════════════════════════════════════════════════════════════════════
-# REGISTRATION
-# ══════════════════════════════════════════════════════════════════════════════
+
 
 @app.post("/api/register")
 async def register(req: RegisterRequest, authorization: str | None = Header(default=None)):
@@ -410,9 +403,7 @@ async def get_profile(user_id: str, current_user_id: str = Depends(require_user)
         "documents":  documents,
     }
 
-# ══════════════════════════════════════════════════════════════════════════════
-# FINANCIALS
-# ══════════════════════════════════════════════════════════════════════════════
+
 
 @app.post("/api/financials")
 async def save_financials(req: FinancialsRequest, current_user_id: str = Depends(require_user)):
@@ -437,9 +428,7 @@ async def save_financials(req: FinancialsRequest, current_user_id: str = Depends
         "foir_headroom":     financials["foir_headroom"],
     }
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DOCUMENT UPLOAD
-# ══════════════════════════════════════════════════════════════════════════════
+
 
 @app.post("/api/documents/upload")
 async def upload_document(
@@ -464,7 +453,7 @@ async def upload_document(
             detail=f"Unsupported document type '{doc_type}'.",
         )
 
-    # ── Save file to Supabase Storage ─────────────────────────────────────────
+    
     file_url = None
     storage_path = f"{to_uuid(user_id)}/{doc_type}/{uuid.uuid4()}-{original_filename}"
     try:
@@ -480,9 +469,9 @@ async def upload_document(
             status_code=500,
             detail=f"Could not upload document to Supabase Storage bucket '{DOCUMENT_BUCKET}'.",
         ) from e
-        print(f"⚠️  Storage upload failed (continuing without URL): {e}")
+        print(f"  Storage upload failed (continuing without URL): {e}")
 
-    # ── Save metadata with URL ────────────────────────────────────────────────
+    
     metadata_saved = False
     initial_status = "pending"
     if file_url:
@@ -609,7 +598,7 @@ async def upload_document(
         }
 
     except Exception as e:
-        print(f"❌ Document extraction error: {e}")
+        print(f" Document extraction error: {e}")
         update_document_extraction(
             user_id=user_id,
             doc_type=doc_type,
@@ -715,9 +704,6 @@ async def delete_document(
         raise HTTPException(status_code=404, detail="Document not found")
     return {"success": True}
 
-# ══════════════════════════════════════════════════════════════════════════════
-# MAIN CHAT ENDPOINT
-# ══════════════════════════════════════════════════════════════════════════════
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest, current_user_id: str = Depends(require_user)):
@@ -810,9 +796,7 @@ async def chat_session(user_id: str, session_id: str, current_user_id: str = Dep
         "session": session,
     }
 
-# ══════════════════════════════════════════════════════════════════════════════
-# LOAN APPLICATION
-# ══════════════════════════════════════════════════════════════════════════════
+
 
 @app.post("/api/loan/apply")
 async def apply_loan(req: LoanApplyRequest, current_user_id: str = Depends(require_user)):
@@ -981,5 +965,5 @@ async def pfl_applications(_: None = Depends(require_officer)):
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))  # Railway injects PORT, local falls back to 8000
+    port = int(os.getenv("PORT", 8000))  
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
