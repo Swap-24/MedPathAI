@@ -58,22 +58,52 @@ Rules:
 """
 
 
-def _gemini_estimate_costs(hospital: dict, profile: dict, symptom_ctx: dict) -> dict | None:
-    """Call Gemini to approximate cost fields when DB has no procedure match."""
-    prompt = _ESTIMATE_PROMPT.format(
-        symptom_summary=symptom_ctx.get("symptom_summary") or "not specified",
-        possible_causes=", ".join(symptom_ctx.get("possible_causes") or []) or "not specified",
-        icd10_code=symptom_ctx.get("icd10_code") or "unknown",
-        procedure_name=hospital.get("procedure_name") or "not mapped",
-        hospital_name=hospital.get("hospital_name", "unknown"),
-        city=hospital.get("city", "unknown"),
-        nabh=hospital.get("nabh_accredited", False),
-        jci=hospital.get("jci_accredited", False),
-        rating=hospital.get("rating", "unknown"),
-        beds=hospital.get("beds", "unknown"),
-        age=profile.get("age", "unknown"),
-        comorbidities=", ".join(profile.get("comorbidities") or []) or "none",
+def _gemini_estimate_costs_batch(
+    hospitals: list[dict], profile: dict, symptom_ctx: dict
+) -> list[dict | None]:
+    """
+    Single Gemini call that estimates costs for ALL hospitals at once.
+    Returns a list in the same order as the input hospitals list.
+    """
+    entries = "\n".join(
+        f"{i+1}. {h.get('hospital_name', 'Unknown')} | {h.get('city', '?')} | "
+        f"NABH:{h.get('nabh_accredited', False)} | JCI:{h.get('jci_accredited', False)} | "
+        f"Rating:{h.get('rating', '?')} | Beds:{h.get('beds', '?')}"
+        for i, h in enumerate(hospitals)
     )
+
+    prompt = f"""
+You are a medical cost estimation expert for Indian hospitals.
+Estimate realistic costs for {len(hospitals)} hospital(s) treating the same clinical need.
+
+Clinical context:
+- Symptom summary: {symptom_ctx.get("symptom_summary") or "not specified"}
+- Possible causes: {", ".join(symptom_ctx.get("possible_causes") or []) or "not specified"}
+- ICD-10 code: {symptom_ctx.get("icd10_code") or "unknown"}
+- Procedure (if known): {hospitals[0].get("procedure_name") or "not mapped"}
+
+Patient: Age {profile.get("age", "unknown")}, Comorbidities: {", ".join(profile.get("comorbidities") or []) or "none"}
+
+Hospitals (in order):{entries}
+
+Return ONLY a valid JSON array with exactly {len(hospitals)} objects in the same order:
+[
+  {{
+    "cost_min_inr": <integer>,
+    "cost_max_inr": <integer>,
+    "avg_cost_inr": <integer>,
+    "waiting_days": <integer>,
+    "success_rate": <float 0.0-1.0>,
+    "avg_recovery_days": <integer>
+  }}
+]
+
+Rules:
+- Costs vary per hospital — NABH/JCI hospitals cost 15-25% more, higher-rated hospitals skew upper end.
+- Diagnostics/imaging: ₹5,000-30,000. Minor procedures: ₹20,000-80,000. Major surgery: ₹80,000-5,00,000.
+- waiting_days: 1-3 for diagnostics, 3-14 for elective surgery.
+- Return ONLY the JSON array, no markdown, no explanation.
+"""
     try:
         raw = _gemini.generate_content(prompt).text.strip()
         if raw.startswith("```"):
@@ -81,18 +111,22 @@ def _gemini_estimate_costs(hospital: dict, profile: dict, symptom_ctx: dict) -> 
             if raw.startswith("json"):
                 raw = raw[4:]
         data = json.loads(raw.strip())
-        return {
-            "cost_min_inr":      int(data["cost_min_inr"]),
-            "cost_max_inr":      int(data["cost_max_inr"]),
-            "avg_cost_inr":      int(data["avg_cost_inr"]),
-            "waiting_days":      int(data.get("waiting_days", 7)),
-            "success_rate":      float(data.get("success_rate", 0.85)),
-            "avg_recovery_days": int(data.get("avg_recovery_days", 5)),
-        }
+        if not isinstance(data, list) or len(data) != len(hospitals):
+            return [None] * len(hospitals)
+        return [
+            {
+                "cost_min_inr":      int(d["cost_min_inr"]),
+                "cost_max_inr":      int(d["cost_max_inr"]),
+                "avg_cost_inr":      int(d["avg_cost_inr"]),
+                "waiting_days":      int(d.get("waiting_days", 7)),
+                "success_rate":      float(d.get("success_rate", 0.85)),
+                "avg_recovery_days": int(d.get("avg_recovery_days", 5)),
+            }
+            for d in data
+        ]
     except Exception as e:
-        print(f"❌ _gemini_estimate_costs error: {e}")
-        return None
-
+        print(f"❌ _gemini_estimate_costs_batch error: {e}")
+        return [None] * len(hospitals)
 
 # ── Per-hospital cost estimator ───────────────────────────────────────────────
 
@@ -100,38 +134,27 @@ def _estimate_for_hospital(
     hospital: dict,
     profile: dict,
     financials: dict,
-    symptom_ctx: dict | None = None,
+    gemini_estimate: dict | None = None,   
 ) -> dict:
-    """Build cost, financing, and eligibility for one hospital card."""
-
     cost_min = hospital.get("cost_min")
     cost_max = hospital.get("cost_max")
     cost_avg = hospital.get("cost_avg")
     is_estimated = False
 
-    # ── If DB has no cost data, ask Gemini to approximate ────────────────────
     if not all(v is not None for v in (cost_min, cost_max, cost_avg)):
-        estimated = _gemini_estimate_costs(hospital, profile, symptom_ctx or {})
-        if estimated:
-            cost_min  = estimated["cost_min_inr"]
-            cost_max  = estimated["cost_max_inr"]
-            cost_avg  = estimated["avg_cost_inr"]
+        if gemini_estimate:
+            cost_min  = gemini_estimate["cost_min_inr"]
+            cost_max  = gemini_estimate["cost_max_inr"]
+            cost_avg  = gemini_estimate["avg_cost_inr"]
             is_estimated = True
-            # Back-fill waiting/recovery so selected_hospital block is complete
             if hospital.get("waiting_days") is None:
-                hospital = {**hospital, "waiting_days": estimated["waiting_days"]}
+                hospital = {**hospital, "waiting_days": gemini_estimate["waiting_days"]}
             if hospital.get("avg_recovery_days") is None:
-                hospital = {**hospital, "avg_recovery_days": estimated["avg_recovery_days"]}
+                hospital = {**hospital, "avg_recovery_days": gemini_estimate["avg_recovery_days"]}
             if hospital.get("success_rate") is None:
-                hospital = {**hospital, "success_rate": estimated["success_rate"]}
+                hospital = {**hospital, "success_rate": gemini_estimate["success_rate"]}
         else:
-            # Gemini also failed — return nothing (same as before, last resort)
-            return {
-                "cost_result": None,
-                "pfl_options": None,
-                "loan_eligibility": None,
-                "loan_amount": None,
-            }
+            return {"cost_result": None, "pfl_options": None, "loan_eligibility": None, "loan_amount": None}
 
     procedure = {
         "min_cost_inr":                  cost_min,
@@ -241,10 +264,25 @@ def run_cost_node(state: dict) -> dict:
             "loan_eligibility_by_hospital": {},
             "nodes_visited":             nodes_visited,
         }
+    
+    hospitals_needing_estimates = [
+        h for h in hospitals
+        if not all(h.get(k) is not None for k in ("cost_min", "cost_max", "cost_avg"))
+    ]
+    batch_estimates = {}
+    if hospitals_needing_estimates:
+        results = _gemini_estimate_costs_batch(hospitals_needing_estimates, profile, symptom_ctx)
+        batch_estimates = {
+            h["hospital_id"]: est
+            for h, est in zip(hospitals_needing_estimates, results)
+        }
 
     estimates_by_hospital = {
         hospital["hospital_id"]: _estimate_for_hospital(
-            hospital, profile, financials, symptom_ctx
+            hospital,
+            profile,
+            financials,
+            gemini_estimate=batch_estimates.get(hospital["hospital_id"]),
         )
         for hospital in hospitals
     }

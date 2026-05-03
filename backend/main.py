@@ -66,6 +66,21 @@ def optional_authenticated_user(authorization: str | None) -> str | None:
     return verify_access_token(authorization.removeprefix("Bearer ").strip())
 
 
+def _gemini_procedure_label(symptom_summary: str, possible_causes: list[str]) -> str:
+    """Generate a short human-readable procedure/treatment label for the PFL dashboard."""
+    try:
+        prompt = (
+            f"A patient described: \"{symptom_summary}\". "
+            f"Clinical signals: {', '.join(possible_causes) or 'unspecified'}. "
+            "In 4-8 words, write a concise medical procedure or treatment label for a loan application form. "
+            "Examples: 'Cardiac evaluation and treatment', 'Orthopaedic knee assessment', 'Abdominal diagnostic workup'. "
+            "Return ONLY the label, no punctuation, no explanation."
+        )
+        text = gemini.generate_content(prompt).text.strip().strip(".")
+        return text if text else "Medical treatment"
+    except Exception:
+        return "Medical treatment"
+
 def safe_filename(filename: str | None) -> str:
     name = os.path.basename(filename or "document").strip()
     return name.replace("/", "_").replace("\\", "_") or "document"
@@ -754,10 +769,12 @@ async def chat(req: ChatRequest, current_user_id: str = Depends(require_user)):
     })
 
     save_session(session_id, {
-        "conversation_history": history,
-        "last_hospitals":       result.get("hospitals", []),
-        "last_procedure":       result.get("procedure"),
-        "last_city":            result.get("city"),
+        "conversation_history":  history,
+        "last_hospitals":        result.get("hospitals", []),
+        "last_procedure":        result.get("procedure"),
+        "last_city":             result.get("city"),
+        "last_symptom_summary":  result.get("symptom_summary", ""),
+        "last_possible_causes":  result.get("possible_causes", []),
     }, user_id=req.user_id)
 
     log_query(session_id, req.user_id, {
@@ -844,7 +861,11 @@ async def apply_loan(req: LoanApplyRequest, current_user_id: str = Depends(requi
 
     session_state = get_session(req.session_id, req.user_id) or {}
     hospitals     = session_state.get("last_hospitals", [])
-    procedure     = session_state.get("last_procedure", "Medical procedure")
+    procedure     = session_state.get("last_procedure")
+    if not procedure:
+        symptom_summary = session_state.get("last_symptom_summary", "")
+        possible_causes = session_state.get("last_possible_causes", [])
+        procedure = _gemini_procedure_label(symptom_summary, possible_causes)
     selected      = None
     if req.selected_hospital:
         selected = next(
