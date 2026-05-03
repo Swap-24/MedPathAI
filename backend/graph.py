@@ -102,7 +102,7 @@ def route_after_intent(state: MedState) -> str:
     if state.get("direct_procedure_request"):
         return "provider"
 
-    if ready and state.get("procedure"):
+    if ready:
         return "provider"
 
     has_question = bool(state.get("clarifying_question"))

@@ -50,33 +50,26 @@ def run_provider_node(state: dict) -> dict:
         user_lat = profile_city_info["latitude"] if profile_city_info else None
         user_lon = profile_city_info["longitude"] if profile_city_info else None
 
-    # If emergency and no procedure — default to angioplasty
-    # (most common cardiac emergency procedure)
-    if is_emergency and not procedure:
-        procedure = "angioplasty"
-
     fallback_note = None
 
-    # If still no procedure, use a broad diagnostic fallback so the user still
-    # gets hospitals to contact instead of a dead end.
-    if not procedure:
-        procedure = "ct_scan"
-        fallback_note = "Used general diagnostic fallback because no exact supported procedure matched."
-
-    # Search hospitals
-    hospitals = search_hospitals(
-        city          = city,
-        procedure_name= procedure,
-        budget        = budget,
-        deadline_days = deadline_days,
-        is_emergency  = is_emergency,
-        user_lat      = user_lat,
-        user_lon      = user_lon,
-        limit         = 3,
-    )
-
     provider_error = None
-    exact_procedure_available = True
+    exact_procedure_available = bool(procedure)
+
+    if procedure:
+        hospitals = search_hospitals(
+            city          = city,
+            procedure_name= procedure,
+            budget        = budget,
+            deadline_days = deadline_days,
+            is_emergency  = is_emergency,
+            user_lat      = user_lat,
+            user_lon      = user_lon,
+            limit         = 3,
+        )
+    else:
+        hospitals = []
+        fallback_note = "No exact supported procedure matched; showing the strongest relevant hospitals."
+
     if not hospitals:
         exact_procedure_available = False
         hospitals = search_best_hospitals_by_city(
@@ -89,8 +82,12 @@ def run_provider_node(state: dict) -> dict:
         )
         if hospitals:
             provider_error = (
-                f"No hospitals in the current database list {procedure} in {city}; "
-                "showing the strongest nearby hospitals by rating, accreditation, distance, and support services."
+                (
+                    f"No hospitals in the current database list {procedure} in {city}; "
+                    if procedure else
+                    f"No exact supported procedure was selected for {city}; "
+                )
+                + "showing the strongest nearby hospitals by rating, accreditation, distance, and support services."
             )
         else:
             provider_error = f"No hospitals found in the current database for {city}."
@@ -98,7 +95,7 @@ def run_provider_node(state: dict) -> dict:
     # Format for frontend
     formatted = []
     for h in hospitals:
-        proc = h.get("procedure", {})
+        proc = h.get("procedure") or {}
         formatted.append({
             "hospital_id":      h["hospital_id"],
             "hospital_name":    h["hospital_name"],
