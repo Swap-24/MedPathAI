@@ -206,7 +206,7 @@ def search_hospitals(
             continue  # misses deadline
 
         # Distance
-        if user_lat and user_lon:
+        if user_lat is not None and user_lon is not None:
             try:
                 dist = haversine(user_lat, user_lon,
                                  float(hosp["latitude"]), float(hosp["longitude"]))
@@ -253,6 +253,78 @@ def search_hospitals(
         top.append(best_over)
 
     return top
+
+
+def search_best_hospitals_by_city(
+    city: str,
+    budget: int | None = None,
+    is_emergency: bool = False,
+    user_lat: float | None = None,
+    user_lon: float | None = None,
+    limit: int = 3,
+) -> list[dict]:
+    """
+    Rank hospitals even when the requested procedure is unavailable in the
+    procedure table. This gives the user practical options instead of an empty
+    result.
+    """
+    city_hospitals = get_hospitals_by_city(city)
+    if city_hospitals.empty:
+        return []
+
+    results = []
+    for _, hosp_row in city_hospitals.iterrows():
+        hosp = hosp_row.to_dict()
+
+        if user_lat is not None and user_lon is not None:
+            try:
+                dist = haversine(user_lat, user_lon,
+                                 float(hosp["latitude"]), float(hosp["longitude"]))
+            except (ValueError, TypeError):
+                dist = None
+        else:
+            dist = None
+
+        score = 0.0
+        score += (float(hosp.get("rating", 3)) / 5.0) * 30
+        score += 20 if _to_bool(hosp.get("nabh_accredited")) else 0
+        score += 10 if _to_bool(hosp.get("jci_accredited")) else 0
+        score += 10 if _to_bool(hosp.get("cashless_insurance")) else 0
+        score += 10 if _to_bool(hosp.get("inhouse_critical_care")) else 0
+        score += 10 if _to_bool(hosp.get("emergency_24x7")) else 0
+
+        consultation_fee = int(hosp.get("consultation_fee_inr", 0))
+        if budget and consultation_fee and consultation_fee <= budget:
+            score += 5
+        if dist is not None:
+            score += max(0, 10 - min(dist, 20) / 2)
+        if is_emergency and not _to_bool(hosp.get("emergency_24x7")):
+            score -= 20
+
+        results.append({
+            "hospital_id":           hosp["hospital_id"],
+            "hospital_name":         hosp["hospital_name"],
+            "chain":                 hosp["chain"],
+            "city":                  hosp["city"],
+            "rating":                float(hosp.get("rating", 0)),
+            "nabh_accredited":       _to_bool(hosp.get("nabh_accredited")),
+            "jci_accredited":        _to_bool(hosp.get("jci_accredited")),
+            "beds":                  int(hosp.get("beds", 0)),
+            "icu_beds":              int(hosp.get("icu_beds", 0)),
+            "emergency_24x7":        _to_bool(hosp.get("emergency_24x7")),
+            "ambulance_available":   _to_bool(hosp.get("ambulance_available")),
+            "cashless_insurance":    _to_bool(hosp.get("cashless_insurance")),
+            "inhouse_critical_care": _to_bool(hosp.get("inhouse_critical_care")),
+            "consultation_fee_inr":  consultation_fee,
+            "distance_km":           round(dist, 1) if dist is not None else None,
+            "score":                 round(score, 2),
+            "over_budget":           False,
+            "procedure":             None,
+            "procedure_unavailable": True,
+        })
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results[:limit]
 
 # ── Calculate cost breakdown ───────────────────────────────────────────────────
 def calculate_cost_breakdown(

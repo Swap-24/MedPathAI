@@ -1,5 +1,6 @@
 from data_loader import (
     search_hospitals,
+    search_best_hospitals_by_city,
     get_city_info,
     SUPPORTED_PROCEDURES
 )
@@ -33,10 +34,21 @@ def run_provider_node(state: dict) -> dict:
             "nodes_visited":  nodes_visited,
         }
 
-    # Get city info (lat/lng for distance)
+    # Get city info for the searched hospital city.
     city_info = get_city_info(city)
-    user_lat = state.get("user_lat") or (city_info["latitude"]  if city_info else None)
-    user_lon = state.get("user_lon") or (city_info["longitude"] if city_info else None)
+
+    # Distance origin:
+    # 1. GPS coordinates when the user has granted location access.
+    # 2. Otherwise, the current city saved in the user's profile.
+    gps_lat = state.get("user_lat")
+    gps_lon = state.get("user_lon")
+    if gps_lat is not None and gps_lon is not None:
+        user_lat = gps_lat
+        user_lon = gps_lon
+    else:
+        profile_city_info = get_city_info(profile.get("city")) if profile.get("city") else None
+        user_lat = profile_city_info["latitude"] if profile_city_info else None
+        user_lon = profile_city_info["longitude"] if profile_city_info else None
 
     # If emergency and no procedure — default to angioplasty
     # (most common cardiac emergency procedure)
@@ -64,10 +76,24 @@ def run_provider_node(state: dict) -> dict:
     )
 
     provider_error = None
+    exact_procedure_available = True
     if not hospitals:
-        provider_error = (
-            f"No hospitals found in the current database for {procedure} in {city}."
+        exact_procedure_available = False
+        hospitals = search_best_hospitals_by_city(
+            city         = city,
+            budget       = budget,
+            is_emergency = is_emergency,
+            user_lat     = user_lat,
+            user_lon     = user_lon,
+            limit        = 3,
         )
+        if hospitals:
+            provider_error = (
+                f"No hospitals in the current database list {procedure} in {city}; "
+                "showing the strongest nearby hospitals by rating, accreditation, distance, and support services."
+            )
+        else:
+            provider_error = f"No hospitals found in the current database for {city}."
 
     # Format for frontend
     formatted = []
@@ -105,6 +131,8 @@ def run_provider_node(state: dict) -> dict:
             "specialists_count":     proc.get("specialists_count"),
             "annual_volume":         proc.get("annual_procedure_volume"),
             "relevance_score":       proc.get("specialization_relevance_score"),
+            "procedure_unavailable": h.get("procedure_unavailable", False),
+            "exact_procedure_available": exact_procedure_available and not h.get("procedure_unavailable", False),
         })
 
     return {

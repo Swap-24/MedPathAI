@@ -11,6 +11,10 @@ import google.generativeai as genai
 load_dotenv()
 
 from graph import run_graph
+from nodes.intent import get_direct_procedure_intent
+from nodes.provider import run_provider_node
+from nodes.cost import run_cost_node
+from nodes.response import run_response_node
 from db import (
     save_user_profile, get_user_profile,
     get_user_profile_by_email, hash_password, verify_password, to_uuid,
@@ -30,6 +34,50 @@ DOCUMENT_EXTRACTION_ENABLED = os.getenv("DOCUMENT_EXTRACTION_ENABLED", "false").
 DOCUMENT_BUCKET = os.getenv("DOCUMENT_BUCKET", "medical-documents")
 
 app = FastAPI(title="MedPath AI", version="1.0.0")
+
+
+def run_direct_procedure_pipeline(
+    *,
+    user_input: str,
+    user_profile: dict,
+    user_financials: dict | None,
+    session_id: str,
+    conversation_history: list,
+    selected_hospital: str | None,
+    user_lat: float | None,
+    user_lon: float | None,
+) -> dict | None:
+    """
+    Hard bypass for direct procedure requests. These should never enter the
+    symptom-clarification branch.
+    """
+    direct_intent = get_direct_procedure_intent(
+        user_input=user_input,
+        user_profile=user_profile,
+        conversation_history=conversation_history,
+    )
+    if not direct_intent:
+        return None
+
+    state = {
+        "user_input": user_input,
+        "session_id": session_id,
+        "user_profile": user_profile or {},
+        "user_financials": user_financials or {},
+        "conversation_history": conversation_history or [],
+        "selected_hospital": selected_hospital,
+        "nodes_visited": ["intent"],
+        "hospitals": [],
+        "possible_causes": [],
+        "user_lat": user_lat,
+        "user_lon": user_lon,
+        **direct_intent,
+    }
+
+    state = run_provider_node(state)
+    state = run_cost_node(state)
+    state = run_response_node(state)
+    return state.get("final_response", {})
 
 # ── CORS — allow React frontend ────────────────────────────────────────────────
 app.add_middleware(
@@ -569,7 +617,7 @@ async def chat(req: ChatRequest):
     session_state = get_session(session_id)
     history       = session_state.get("conversation_history", []) if session_state else []
 
-    result = await run_graph(
+    result = run_direct_procedure_pipeline(
         user_input           = req.message,
         user_profile         = profile,
         user_financials      = financials,
@@ -579,6 +627,18 @@ async def chat(req: ChatRequest):
         user_lat             = req.user_lat,
         user_lon             = req.user_lon,
     )
+
+    if result is None:
+        result = await run_graph(
+            user_input           = req.message,
+            user_profile         = profile,
+            user_financials      = financials,
+            session_id           = session_id,
+            conversation_history = history,
+            selected_hospital    = req.selected_hospital,
+            user_lat             = req.user_lat,
+            user_lon             = req.user_lon,
+        )
 
     history.append({
         "user":      req.message,

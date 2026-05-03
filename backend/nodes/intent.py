@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from difflib import get_close_matches
 
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -19,6 +20,76 @@ SUPPORTED_PROCEDURES = [
     "knee_replacement", "lasik", "mri_scan", "normal_delivery",
 ]
 
+PROCEDURE_ALIASES = {
+    "angioplasty": "angioplasty",
+    "appendectomy": "appendectomy",
+    "appendix surgery": "appendectomy",
+    "arthroscopy": "arthroscopy",
+    "bypass": "bypass_cabg",
+    "bypass surgery": "bypass_cabg",
+    "cabg": "bypass_cabg",
+    "c section": "c_section",
+    "cesarean": "c_section",
+    "caesarean": "c_section",
+    "cataract": "cataract",
+    "cataract surgery": "cataract",
+    "colonoscopy": "colonoscopy",
+    "ct": "ct_scan",
+    "ct scan": "ct_scan",
+    "dialysis": "dialysis_single",
+    "ecg": "ecg_echo",
+    "echo": "ecg_echo",
+    "echocardiogram": "ecg_echo",
+    "endoscopy": "endoscopy",
+    "gallbladder": "gallbladder_surgery",
+    "gallbladder surgery": "gallbladder_surgery",
+    "hernia": "hernia_repair",
+    "hernia repair": "hernia_repair",
+    "hip replacement": "hip_replacement",
+    "hysterectomy": "hysterectomy",
+    "kidney stone": "kidney_stone_removal",
+    "kidney stone removal": "kidney_stone_removal",
+    "knee replacement": "knee_replacement",
+    "lasik": "lasik",
+    "mri": "mri_scan",
+    "mri scan": "mri_scan",
+    "normal delivery": "normal_delivery",
+}
+
+DIRECT_PROCEDURE_MARKERS = (
+    "need", "want", "looking for", "find", "show", "recommend", "suggest",
+    "hospital for", "hospitals for", "doctor for", "where can i get",
+    "planning", "scheduled", "procedure", "surgery", "operation", "scan",
+    "treatment for",
+)
+
+PROCEDURE_NOUNS = (
+    "procedure", "surgery", "operation", "scan", "screening", "test",
+    "treatment", "therapy", "implant", "implantation", "transplant",
+    "replacement", "repair", "removal", "biopsy", "dialysis", "delivery",
+    "reconstruction", "correction", "excision", "fusion", "fixation",
+    "ablation", "extraction", "angiography",
+    "pacemaker", "stent", "stenting", "angiogram", "xray", "x ray",
+    "ultrasound", "sonography", "chemo", "chemotherapy", "radiotherapy",
+    "radiation", "vaccination", "injection", "transfusion", "laparoscopy",
+    "root canal", "ivf", "iui", "fertility", "plasty", "ectomy",
+    "oscopy", "ostomy",
+)
+
+COMMON_CITIES = (
+    "mumbai", "delhi", "bengaluru", "bangalore", "hyderabad", "chennai",
+    "kolkata", "pune", "ahmedabad", "jaipur", "lucknow", "nagpur",
+    "indore", "coimbatore", "surat", "bhopal",
+)
+
+SYMPTOM_TERMS = (
+    "ache", "pain", "fever", "vomit", "vomiting", "nausea", "dizzy",
+    "dizziness", "breath", "breathing", "cough", "headache", "abdomen",
+    "abdominal", "stomach", "chest", "weak", "weakness", "injury",
+    "bleeding", "vision", "urine", "stool", "swelling", "tooth",
+    "teeth", "dental", "gum", "jaw", "ear", "throat", "rash",
+)
+
 INTENT_PROMPT = """
 You are MedPath's clinical intake AI for hospital navigation in India.
 Use clinical reasoning to understand the user's symptoms and decide whether to ask a follow-up or show hospitals.
@@ -35,7 +106,9 @@ Important boundaries:
 - The app has already asked {clarify_attempts} clarification question(s). If this is {max_clarify_attempts} or more, do not ask another question. Choose the closest hospital-search route now.
 - If there are emergency warning signs, mark emergency and make the route ready immediately.
 - If details are limited but enough to search after the clarification budget, choose the best supported procedure or diagnostic route.
-
+- If the user mentions a budget, try to extract an integer INR amount from it, ideally in lakhs (e.g. "2 lakhs", "200000", "under 3 lakh", "budget 150000").
+-If the user asks for a specific procedure, no need to ask calirifaction questions, just display hospitals for that procedure. If the procedure is not in the supported list, choose the closest one.
+- If the current user message describes a new symptom or body area, treat it as a new care topic. Do not reuse a procedure from conversation history unless the current message explicitly refers back to it.
 Supported hospital-search procedures. The "procedure" field must be exactly one of these or null:
 {procedures}
 
@@ -123,6 +196,51 @@ def _normalize_text(value: str) -> str:
     return re.sub(r"[^a-z0-9\s]", "", (value or "").strip().lower())
 
 
+def _direct_procedure_from_text(text: str) -> tuple[bool, str | None]:
+    normalized = _normalize_text(text)
+    has_marker = any(marker in normalized for marker in DIRECT_PROCEDURE_MARKERS)
+    has_care_seeking_phrase = bool(re.search(
+        r"\b(i\s+need|need\s+(a\s+)?|looking\s+for|show|find|recommend|suggest|hospital|doctor|where\s+can\s+i\s+get)\b",
+        normalized,
+    ))
+    has_procedure_noun = any(noun in normalized for noun in PROCEDURE_NOUNS)
+    procedure_matches = {
+        phrase: procedure
+        for phrase, procedure in PROCEDURE_ALIASES.items()
+        if re.search(rf"\b{re.escape(phrase)}\b", normalized)
+    }
+
+    if procedure_matches:
+        longest_phrase = max(procedure_matches, key=len)
+        return True, procedure_matches[longest_phrase]
+
+    if not ((has_marker or has_care_seeking_phrase) and has_procedure_noun):
+        return False, None
+
+    supported_labels = {
+        procedure.replace("_", " "): procedure
+        for procedure in SUPPORTED_PROCEDURES
+    }
+    close = get_close_matches(normalized, supported_labels.keys(), n=1, cutoff=0.55)
+    if close:
+        return True, supported_labels[close[0]]
+
+    if any(term in normalized for term in ("brain", "neuro", "head")):
+        return True, "mri_scan"
+    if any(term in normalized for term in ("knee", "joint")):
+        return True, "arthroscopy"
+    if "hip" in normalized:
+        return True, "hip_replacement"
+    if any(term in normalized for term in ("heart", "cardiac", "pacemaker", "angiogram")):
+        return True, "ecg_echo"
+    if any(term in normalized for term in ("stent", "stenting")):
+        return True, "angioplasty"
+    if "eye" in normalized:
+        return True, "cataract"
+
+    return True, "ct_scan"
+
+
 def _safe_list(value) -> list:
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()][:3]
@@ -144,6 +262,42 @@ def _combined_user_text(state: dict) -> str:
     for turn in state.get("conversation_history", [])[-4:]:
         parts.append(turn.get("user", ""))
     return _normalize_text(" ".join(parts))
+
+
+def _current_user_text(state: dict) -> str:
+    return _normalize_text(state.get("user_input", ""))
+
+
+def _is_direct_procedure_request(state: dict) -> tuple[bool, str | None]:
+    return _direct_procedure_from_text(_current_user_text(state))
+
+
+def _procedure_mentioned_in_current_message(procedure: str | None, state: dict) -> bool:
+    if not procedure:
+        return False
+
+    text = _current_user_text(state)
+    labels = [procedure.replace("_", " ")]
+    labels.extend(
+        phrase
+        for phrase, mapped_procedure in PROCEDURE_ALIASES.items()
+        if mapped_procedure == procedure
+    )
+    return any(re.search(rf"\b{re.escape(label)}\b", text) for label in labels)
+
+
+def _current_message_starts_symptom_topic(state: dict) -> bool:
+    text = _current_user_text(state)
+    direct_procedure_request, _ = _is_direct_procedure_request(state)
+    return bool(text) and not direct_procedure_request and _has_any(text, SYMPTOM_TERMS)
+
+
+def _history_has_direct_procedure_request(state: dict) -> bool:
+    for turn in state.get("conversation_history", [])[-4:]:
+        is_direct, _ = _direct_procedure_from_text(turn.get("user", ""))
+        if is_direct:
+            return True
+    return False
 
 
 def _question_was_asked(question: str | None, state: dict) -> bool:
@@ -177,8 +331,87 @@ def _extract_budget(text: str) -> int | None:
     if match:
         return int(float(match.group(1)) * 100000)
 
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(crore|cr)", text)
+    if match:
+        return int(float(match.group(1)) * 10000000)
+
     match = re.search(r"(?:under|budget|below|upto|up to)\s*(\d{4,8})", text)
     return int(match.group(1)) if match else None
+
+
+def _extract_deadline_days(text: str) -> int | None:
+    if re.search(r"\b(today|asap|urgent|immediately|right away)\b", text):
+        return 0
+    if "tomorrow" in text:
+        return 1
+
+    match = re.search(r"\b(?:in|within|next|under)\s+(\d+)\s*(day|days|week|weeks|month|months)\b", text)
+    if not match:
+        return None
+
+    amount = int(match.group(1))
+    unit = match.group(2)
+    if unit.startswith("week"):
+        return amount * 7
+    if unit.startswith("month"):
+        return amount * 30
+    return amount
+
+
+def _extract_city(text: str) -> str | None:
+    normalized = _normalize_text(text)
+    for city in COMMON_CITIES:
+        if re.search(rf"\b{re.escape(city)}\b", normalized):
+            return "Bengaluru" if city == "bangalore" else city.title()
+
+    match = re.search(r"\b(?:in|near|around|at)\s+([a-z]+(?:\s+[a-z]+){0,2})\b", normalized)
+    if match:
+        candidate = match.group(1).strip()
+        if not re.search(r"\b(day|days|week|weeks|month|months|lakh|lac|crore|cr|budget|under|within|next)\b", candidate):
+            return candidate.title()
+
+    return None
+
+
+def _direct_procedure_extraction(state: dict) -> dict | None:
+    direct_procedure_request, procedure = _is_direct_procedure_request(state)
+    if not direct_procedure_request:
+        return None
+
+    current_text = _current_user_text(state)
+    profile = state.get("user_profile", {})
+
+    return {
+        "procedure": procedure or "ct_scan",
+        "city": _extract_city(current_text) or profile.get("city"),
+        "budget": _extract_budget(current_text) or state.get("budget"),
+        "deadline_days": _extract_deadline_days(current_text),
+        "is_emergency": False,
+        "ambiguity_score": 0.2,
+        "clarifying_question": None,
+        "possible_causes": [],
+        "icd10_code": None,
+        "symptom_summary": state.get("user_input", ""),
+        "recommendation_ready": True,
+        "direct_procedure_request": True,
+        "emergency_confidence": 0.0,
+        "follow_up_answers": {},
+    }
+
+
+def get_direct_procedure_intent(
+    user_input: str,
+    user_profile: dict,
+    conversation_history: list | None = None,
+    budget: int | None = None,
+) -> dict | None:
+    """Return provider-ready intent for procedure requests, bypassing Gemini."""
+    return _direct_procedure_extraction({
+        "user_input": user_input,
+        "user_profile": user_profile or {},
+        "conversation_history": conversation_history or [],
+        "budget": budget,
+    })
 
 
 def _has_any(text: str, terms: tuple[str, ...]) -> bool:
@@ -192,12 +425,7 @@ def _fallback_question(state: dict, procedure: str | None = None) -> str | None:
     def not_asked(*markers: str) -> bool:
         return not any(marker in asked for marker in markers)
 
-    symptom_terms = (
-        "pain", "fever", "vomit", "nausea", "dizzy", "breath", "cough",
-        "headache", "abdomen", "abdominal", "stomach", "chest", "weak",
-        "injury", "bleeding", "vision", "urine", "stool", "swelling",
-    )
-    if not _has_any(text, symptom_terms):
+    if not _has_any(text, SYMPTOM_TERMS):
         if not_asked("what symptoms", "what symptom", "experiencing"):
             return "What symptoms are you having, and how long has this been going on?"
         return "What is the main symptom bothering you right now?"
@@ -237,7 +465,7 @@ def _fallback_question(state: dict, procedure: str | None = None) -> str | None:
 
 
 def _fallback_route(state: dict) -> dict:
-    text = _combined_user_text(state)
+    text = _current_user_text(state) if _current_message_starts_symptom_topic(state) else _combined_user_text(state)
 
     emergency_terms = ("breath", "breathing", "left arm", "severe chest", "unconscious")
     if "chest" in text and any(term in text for term in emergency_terms):
@@ -297,10 +525,24 @@ def _fallback_route(state: dict) -> dict:
 def _normalize_extraction(extracted: dict, state: dict) -> dict:
     profile = state.get("user_profile", {})
     clarify_attempts = state.get("clarify_attempts", 0)
+    combined_text = _combined_user_text(state)
+    direct_procedure_request, direct_procedure = _is_direct_procedure_request(state)
 
     procedure = extracted.get("procedure")
     if procedure not in SUPPORTED_PROCEDURES:
         procedure = None
+    if direct_procedure:
+        procedure = direct_procedure
+    elif direct_procedure_request:
+        procedure = "ct_scan"
+    elif (
+        _history_has_direct_procedure_request(state)
+        and _current_message_starts_symptom_topic(state)
+        and not _procedure_mentioned_in_current_message(procedure, state)
+        and not bool(extracted.get("is_emergency", False))
+    ):
+        procedure = None
+        extracted["recommendation_ready"] = False
 
     is_emergency = bool(extracted.get("is_emergency", False))
     emergency_confidence = float(extracted.get("emergency_confidence") or 0.0)
@@ -308,15 +550,20 @@ def _normalize_extraction(extracted: dict, state: dict) -> dict:
     clarifying_question = extracted.get("clarifying_question")
     ambiguity_score = float(extracted.get("ambiguity_score") or 0.5)
 
+    if direct_procedure_request:
+        clarifying_question = None
+        recommendation_ready = True
+        ambiguity_score = min(ambiguity_score, 0.25)
+
     if clarify_attempts >= MAX_CLARIFY_ATTEMPTS:
         clarifying_question = None
     elif _question_was_asked(clarifying_question, state):
         clarifying_question = _fallback_question(state, procedure)
 
-    if not clarifying_question and not recommendation_ready:
+    if not clarifying_question and not recommendation_ready and not direct_procedure_request:
         clarifying_question = _fallback_question(state, procedure)
 
-    if procedure and clarify_attempts < MAX_CLARIFY_ATTEMPTS and not is_emergency:
+    if procedure and clarify_attempts < MAX_CLARIFY_ATTEMPTS and not is_emergency and not direct_procedure_request:
         follow_up_question = _fallback_question(state, procedure)
         if follow_up_question and not _question_was_asked(follow_up_question, state):
             clarifying_question = follow_up_question
@@ -342,11 +589,16 @@ def _normalize_extraction(extracted: dict, state: dict) -> dict:
         ambiguity_score = max(ambiguity_score, 0.75)
         recommendation_ready = False
 
+    if direct_procedure_request:
+        clarifying_question = None
+        recommendation_ready = True
+        ambiguity_score = min(ambiguity_score, 0.25)
+
     return {
         "procedure": procedure,
-        "city": extracted.get("city") or profile.get("city"),
-        "budget": extracted.get("budget"),
-        "deadline_days": extracted.get("deadline_days"),
+        "city": _extract_city(combined_text) or extracted.get("city") or profile.get("city"),
+        "budget": extracted.get("budget") or _extract_budget(combined_text),
+        "deadline_days": extracted.get("deadline_days") or _extract_deadline_days(combined_text),
         "is_emergency": is_emergency,
         "ambiguity_score": ambiguity_score,
         "clarifying_question": clarifying_question,
@@ -354,6 +606,7 @@ def _normalize_extraction(extracted: dict, state: dict) -> dict:
         "icd10_code": extracted.get("icd10_code"),
         "symptom_summary": extracted.get("symptom_summary") or state.get("user_input", ""),
         "recommendation_ready": recommendation_ready,
+        "direct_procedure_request": direct_procedure_request,
         "emergency_confidence": emergency_confidence,
         "follow_up_answers": extracted.get("follow_up_answers") if isinstance(extracted.get("follow_up_answers"), dict) else {},
     }
@@ -362,17 +615,19 @@ def _normalize_extraction(extracted: dict, state: dict) -> dict:
 def _fallback_extraction(state: dict) -> dict:
     profile = state.get("user_profile", {})
     clarify_attempts = state.get("clarify_attempts", 0)
+    combined_text = _combined_user_text(state)
+    direct_procedure_request, direct_procedure = _is_direct_procedure_request(state)
     route = _fallback_route(state)
-    procedure = route.get("procedure")
-    clarifying_question = route.get("clarifying_question") or _fallback_question(state, procedure)
-    ready = (bool(procedure) and not clarifying_question) or clarify_attempts >= MAX_CLARIFY_ATTEMPTS
+    procedure = direct_procedure or route.get("procedure")
+    clarifying_question = None if direct_procedure_request else route.get("clarifying_question") or _fallback_question(state, procedure)
+    ready = direct_procedure_request or (bool(procedure) and not clarifying_question) or clarify_attempts >= MAX_CLARIFY_ATTEMPTS
     is_emergency = bool(route.get("is_emergency", False))
 
     return {
         "procedure": procedure or ("ct_scan" if ready else None),
-        "city": profile.get("city"),
-        "budget": _extract_budget(_combined_user_text(state)),
-        "deadline_days": None,
+        "city": _extract_city(combined_text) or profile.get("city"),
+        "budget": _extract_budget(combined_text),
+        "deadline_days": _extract_deadline_days(combined_text),
         "is_emergency": is_emergency,
         "ambiguity_score": route.get("ambiguity_score", 0.8 if not ready else 0.5),
         "clarifying_question": None if ready else clarifying_question,
@@ -380,6 +635,7 @@ def _fallback_extraction(state: dict) -> dict:
         "icd10_code": route.get("icd10_code"),
         "symptom_summary": state.get("user_input", ""),
         "recommendation_ready": ready,
+        "direct_procedure_request": direct_procedure_request,
         "emergency_confidence": route.get("emergency_confidence", 0.0),
         "follow_up_answers": {},
     }
@@ -391,24 +647,26 @@ def run_intent_node(state: dict) -> dict:
     nodes_visited = state.get("nodes_visited", [])
     nodes_visited.append("intent")
 
-    prompt = INTENT_PROMPT.format(
-        procedures=", ".join(SUPPORTED_PROCEDURES),
-        clarify_attempts=state.get("clarify_attempts", 0),
-        max_clarify_attempts=MAX_CLARIFY_ATTEMPTS,
-        name=profile.get("name", "User"),
-        age=profile.get("age", "unknown"),
-        city=profile.get("city", "unknown"),
-        comorbidities=", ".join(profile.get("comorbidities", [])) or "none",
-        history=_history_text(state.get("conversation_history", [])),
-        user_input=user_input,
-    )
+    extracted = _direct_procedure_extraction(state)
+    if extracted is None:
+        prompt = INTENT_PROMPT.format(
+            procedures=", ".join(SUPPORTED_PROCEDURES),
+            clarify_attempts=state.get("clarify_attempts", 0),
+            max_clarify_attempts=MAX_CLARIFY_ATTEMPTS,
+            name=profile.get("name", "User"),
+            age=profile.get("age", "unknown"),
+            city=profile.get("city", "unknown"),
+            comorbidities=", ".join(profile.get("comorbidities", [])) or "none",
+            history=_history_text(state.get("conversation_history", [])),
+            user_input=user_input,
+        )
 
-    try:
-        response = model.generate_content(prompt)
-        extracted = _json_from_model(response.text)
-    except Exception as e:
-        print(f"Intent Gemini error: {e}")
-        extracted = _fallback_extraction(state)
+        try:
+            response = model.generate_content(prompt)
+            extracted = _json_from_model(response.text)
+        except Exception as e:
+            print(f"Intent Gemini error: {e}")
+            extracted = _fallback_extraction(state)
 
     extracted = _normalize_extraction(extracted, state)
 
@@ -425,6 +683,7 @@ def run_intent_node(state: dict) -> dict:
         "icd10_code": extracted["icd10_code"],
         "symptom_summary": extracted["symptom_summary"],
         "recommendation_ready": extracted["recommendation_ready"],
+        "direct_procedure_request": extracted["direct_procedure_request"],
         "emergency_confidence": extracted["emergency_confidence"],
         "follow_up_answers": extracted["follow_up_answers"],
         "nodes_visited": nodes_visited,

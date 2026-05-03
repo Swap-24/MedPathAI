@@ -57,6 +57,7 @@ class MedState(TypedDict, total=False):
     symptom_summary:      str
     follow_up_answers:    dict
     recommendation_ready: bool
+    direct_procedure_request: bool
     emergency_confidence: float
 
     # Set by provider_node
@@ -96,6 +97,12 @@ def route_after_intent(state: MedState) -> str:
     clarify_attempts = state.get("clarify_attempts", 0)
 
     if is_emergency and emergency_conf >= 0.85:
+        return "provider"
+
+    if state.get("direct_procedure_request"):
+        return "provider"
+
+    if ready and state.get("procedure"):
         return "provider"
 
     has_question = bool(state.get("clarifying_question"))
@@ -212,6 +219,7 @@ async def run_graph(
         "clarify_attempts":     _count_previous_clarifications(conversation_history),
         "is_emergency":         False,
         "recommendation_ready": False,
+        "direct_procedure_request": False,
         "emergency_confidence": 0.0,
         "ambiguity_score":      0.5,
         "hospitals":            [],

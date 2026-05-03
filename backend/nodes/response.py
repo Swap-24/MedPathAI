@@ -116,6 +116,22 @@ def _build_chat_recommendation(state: dict) -> str:
     symptom_summary = (state.get("symptom_summary") or state.get("user_input") or "").strip()
     hospital_names = [h.get("hospital_name") for h in hospitals[:3] if h.get("hospital_name")]
 
+    if state.get("direct_procedure_request"):
+        if hospitals:
+            hospital_text = f"I found {len(hospitals)} hospital option{'s' if len(hospitals) != 1 else ''} in {city} for {procedure}."
+            names_text = f" Top matches include {_format_list(hospital_names)}." if hospital_names else ""
+            provider_note = (
+                " Exact procedure availability was not listed, so these are ranked by rating, accreditation, distance, and support services."
+                if any(h.get("procedure_unavailable") for h in hospitals)
+                else " They are ranked using procedure availability, cost fit, waiting time, ratings, accreditation, and distance."
+            )
+            return f"{name}, {hospital_text}{names_text}{provider_note}"
+
+        return (
+            f"{name}, I could not find hospital options for {procedure} in {city} "
+            "in the current database. Try a nearby city or broaden the location."
+        )
+
     prompt = f"""
 Write MedPath's chat response.
 
@@ -181,7 +197,9 @@ def run_response_node(state: dict) -> dict:
     explanation = _build_chat_recommendation({**state, "possible_causes": clinical_signals})
 
     final_response = {
+        "type": "recommendation",
         "is_emergency": state.get("is_emergency", False),
+        "direct_procedure_request": state.get("direct_procedure_request", False),
         "symptom_summary": state.get("symptom_summary", ""),
         "procedure": state.get("procedure"),
         "city": state.get("city"),

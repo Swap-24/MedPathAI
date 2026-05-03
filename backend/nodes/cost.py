@@ -8,6 +8,14 @@ from data_loader import (
 
 def _estimate_for_hospital(hospital: dict, profile: dict, financials: dict) -> dict:
     """Build cost, financing, and eligibility for one hospital card."""
+    if not all(hospital.get(key) is not None for key in ("cost_min", "cost_max", "cost_avg")):
+        return {
+            "cost_result": None,
+            "pfl_options": None,
+            "loan_eligibility": None,
+            "loan_amount": None,
+        }
+
     procedure = {
         "min_cost_inr": hospital["cost_min"],
         "max_cost_inr": hospital["cost_max"],
@@ -131,14 +139,17 @@ def run_cost_node(state: dict) -> dict:
         "cost_results_by_hospital": {
             hospital_id: estimate["cost_result"]
             for hospital_id, estimate in estimates_by_hospital.items()
+            if estimate["cost_result"] is not None
         },
         "pfl_options_by_hospital": {
             hospital_id: estimate["pfl_options"]
             for hospital_id, estimate in estimates_by_hospital.items()
+            if estimate["pfl_options"] is not None
         },
         "loan_eligibility_by_hospital": {
             hospital_id: estimate["loan_eligibility"]
             for hospital_id, estimate in estimates_by_hospital.items()
+            if estimate["loan_eligibility"] is not None
         },
         "nodes_visited": nodes_visited,
     }
