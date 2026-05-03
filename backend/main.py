@@ -822,7 +822,6 @@ async def apply_loan(req: LoanApplyRequest, current_user_id: str = Depends(requi
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    # ── Step 1: Run eligibility ────────────────────────────────────────────────
     eligibility = run_eligibility(
         loan_amount      = req.loan_amount,
         monthly_income   = financials.get("monthly_income") or 0,
@@ -832,7 +831,6 @@ async def apply_loan(req: LoanApplyRequest, current_user_id: str = Depends(requi
         age              = profile.get("age") or 35,
     )
 
-    # ── Step 2: If RED — return immediately, don't send to PFL ────────────────
     if eligibility["decision"] == "RED":
         return {
             "success":      True,
@@ -844,7 +842,6 @@ async def apply_loan(req: LoanApplyRequest, current_user_id: str = Depends(requi
             "sent_to_pfl":  False,
         }
 
-    # ── Step 3: Get hospital + procedure from session ─────────────────────────
     session_state = get_session(req.session_id, req.user_id) or {}
     hospitals     = session_state.get("last_hospitals", [])
     procedure     = session_state.get("last_procedure", "Medical procedure")
@@ -857,7 +854,6 @@ async def apply_loan(req: LoanApplyRequest, current_user_id: str = Depends(requi
     selected      = selected or (hospitals[0] if hospitals else {})
     hospital_name = selected.get("hospital_name") or selected.get("name") or "Selected Hospital"
 
-    # ── Step 4: Build and save application package ────────────────────────────
     ref_id, application = build_application_package(
         user_id       = req.user_id,
         profile       = profile,
@@ -960,10 +956,9 @@ async def pfl_applications(_: None = Depends(require_officer)):
     applications = get_all_loan_applications()
     return {"applications": applications}
 
-# ══════════════════════════════════════════════════════════════════════════════
-# RUN SERVER
-# ══════════════════════════════════════════════════════════════════════════════
+
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.getenv("PORT", 8000))  # Railway injects PORT, local falls back to 8000
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
