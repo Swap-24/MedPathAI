@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { sendMessage } from '../api/chat'
+import { getChatSession, sendMessage } from '../api/chat'
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { useUserStore } from '../store/userStore'
@@ -11,6 +11,7 @@ export default function useChat() {
   const selectedHospital = useChatStore((s) => s.selectedHospital)
   const isLoading = useChatStore((s) => s.isLoading)
   const setSessionId = useChatStore((s) => s.setSessionId)
+  const setMessages = useChatStore((s) => s.setMessages)
   const addMessage = useChatStore((s) => s.addMessage)
   const setLoading = useChatStore((s) => s.setLoading)
   const setSelectedHospital = useChatStore((s) => s.setSelectedHospital)
@@ -54,12 +55,51 @@ export default function useChat() {
     }
   }, [addMessage, isLoading, selectedHospital, sessionId, setLoading, setSessionId, toast, userId])
 
+  const loadSession = useCallback(async (nextSessionId) => {
+    if (!userId || !nextSessionId) return null
+
+    try {
+      const data = await getChatSession(userId, nextSessionId)
+      const history = data.session?.conversation_history || []
+      const restored = history.flatMap((turn, index) => {
+        const pair = []
+        if (turn.user) {
+          pair.push({
+            id: `${nextSessionId}-u-${index}`,
+            role: 'user',
+            content: turn.user,
+            timestamp: new Date(),
+          })
+        }
+        if (turn.assistant) {
+          pair.push({
+            id: `${nextSessionId}-a-${index}`,
+            role: 'ai',
+            content: turn.assistant,
+            data: { type: turn.type || 'recommendation' },
+            timestamp: new Date(),
+          })
+        }
+        return pair
+      })
+
+      setSessionId(nextSessionId)
+      setSelectedHospital(null)
+      setMessages(restored)
+      return data.session
+    } catch (err) {
+      toast(err.message || 'Could not load chat', 'error')
+      throw err
+    }
+  }, [setMessages, setSelectedHospital, setSessionId, toast, userId])
+
   return {
     messages,
     sessionId,
     selectedHospital,
     isLoading,
     submitMessage,
+    loadSession,
     setSelectedHospital,
     clearChat,
   }

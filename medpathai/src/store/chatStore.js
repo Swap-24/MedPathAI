@@ -9,6 +9,7 @@ export const useChatStore = create((set) => ({
   setSessionId: (id) => set({ sessionId: id }),
   setLoading: (v) => set({ isLoading: v }),
   setSelectedHospital: (h) => set({ selectedHospital: h }),
+  setMessages: (messages) => set({ messages }),
 
   addMessage: (msg) =>
     set((s) => ({

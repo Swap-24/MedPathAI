@@ -22,7 +22,7 @@ from db import (
     save_document_metadata, get_user_documents, save_document_with_url,
     update_document_extraction, delete_user_document,
     get_user_document, update_user_document_file,
-    save_session, get_session,
+    save_session, get_session, get_user_sessions,
     log_query,
     save_loan_application, get_loan_application,
     update_loan_status, get_all_loan_applications, get_user_loan_applications,
@@ -150,6 +150,10 @@ class ChatRequest(BaseModel):
     selected_hospital: Optional[str]   = None
     user_lat:          Optional[float] = None
     user_lon:          Optional[float] = None
+
+class ChatHistorySessionRequest(BaseModel):
+    user_id: str
+    session_id: str
 
 class RegisterRequest(BaseModel):
     user_id:                 str
@@ -741,6 +745,26 @@ async def chat(req: ChatRequest, current_user_id: str = Depends(require_user)):
     return {
         "session_id": session_id,
         "response":   result,
+    }
+
+
+@app.get("/api/chat/history/{user_id}")
+async def chat_history(user_id: str, current_user_id: str = Depends(require_user)):
+    """Return the user's 10 most recent chat sessions."""
+    assert_same_user(user_id, current_user_id)
+    return {"sessions": get_user_sessions(user_id, limit=10)}
+
+
+@app.get("/api/chat/session/{user_id}/{session_id}")
+async def chat_session(user_id: str, session_id: str, current_user_id: str = Depends(require_user)):
+    """Return one saved chat session so the frontend can restore it."""
+    assert_same_user(user_id, current_user_id)
+    session = get_session(session_id, user_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    return {
+        "session_id": session_id,
+        "session": session,
     }
 
 # ══════════════════════════════════════════════════════════════════════════════

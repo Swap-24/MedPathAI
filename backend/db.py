@@ -462,6 +462,43 @@ def get_session(session_id: str, user_id: str | None = None) -> dict | None:
         return None
 
 
+def get_user_sessions(user_id: str, limit: int = 10) -> list[dict]:
+    """Return recent chat sessions for a user, newest first."""
+    try:
+        res = (
+            supabase.table("sessions")
+            .select("id, langgraph_state, resolved_city, resolved_procedure, last_active_at")
+            .eq("user_id", to_uuid(user_id))
+            .order("last_active_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+
+        sessions = []
+        for row in res.data or []:
+            state = row.get("langgraph_state") or {}
+            history = state.get("conversation_history") or []
+            first_user_message = next(
+                (turn.get("user") for turn in history if turn.get("user")),
+                "New chat",
+            )
+            last_turn = history[-1] if history else {}
+            sessions.append({
+                "session_id": row.get("id"),
+                "title": first_user_message[:80],
+                "last_user_message": last_turn.get("user"),
+                "last_assistant_message": last_turn.get("assistant"),
+                "last_city": row.get("resolved_city") or state.get("last_city"),
+                "last_procedure": row.get("resolved_procedure") or state.get("last_procedure"),
+                "last_active_at": row.get("last_active_at"),
+                "message_count": len(history),
+            })
+        return sessions
+    except Exception as e:
+        print(f"❌ get_user_sessions error: {e}")
+        return []
+
+
 def delete_session(session_id: str) -> bool:
     """Delete a session (new conversation)."""
     try:
